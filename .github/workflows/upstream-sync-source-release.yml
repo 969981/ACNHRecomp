@@ -1,0 +1,90 @@
+# Mirror Nycolazs/ACNHRecomp safely. Never package proprietary game files,
+# game-derived executables or a recompiled game. Existing manual Build remains intact.
+name: Sync ACNHRecomp and release source snapshots
+
+on:
+  schedule:
+    - cron: '23,53 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/upstream-sync-source-release.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: acnhrecomp-upstream-source-release
+  cancel-in-progress: false
+
+jobs:
+  sync-and-release:
+    if: github.repository == '969981/ACNHRecomp'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Merge upstream without overwriting local branches
+        id: sync
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/Nycolazs/ACNHRecomp.git
+          git fetch --no-tags upstream +refs/heads/main:refs/remotes/upstream/main
+          upstream_sha="$(git rev-parse refs/remotes/upstream/main)"
+          if ! git merge-base --is-ancestor "$upstream_sha" HEAD; then
+            git merge --no-edit --no-ff "$upstream_sha"
+            git push origin HEAD:refs/heads/main
+          fi
+          commit_sha="$(git rev-parse HEAD)"
+          tag="upstream-${upstream_sha:0:12}"
+          {
+            echo "upstream=$upstream_sha"
+            echo "commit=$commit_sha"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Archive standalone source code with checksum
+        if: steps.sync.outputs.publish == 'true'
+        shell: bash
+        env:
+          UPSTREAM_SHA: ${{ steps.sync.outputs.upstream }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git archive --format=tar --prefix=ACNHRecomp/ HEAD | gzip -n > "dist/ACNHRecomp-source-${UPSTREAM_SHA:0:12}.tar.gz"
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+
+      - name: Publish ROM-free source snapshot
+        if: steps.sync.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.sync.outputs.tag }}
+          UPSTREAM_SHA: ${{ steps.sync.outputs.upstream }}
+          COMMIT: ${{ steps.sync.outputs.commit }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            exit 0
+          fi
+          printf 'Unofficial synchronized source snapshot from Nycolazs/ACNHRecomp.\nUpstream: %s\nMirror: %s\nNo Nintendo game content or game-derived binary is distributed.\n' "$UPSTREAM_SHA" "$COMMIT" > release-notes.md
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$COMMIT" \
+            --title "ACNHRecomp source ${UPSTREAM_SHA:0:12}" \
+            --notes-file release-notes.md \
+            --prerelease
