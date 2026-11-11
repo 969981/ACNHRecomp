@@ -40,9 +40,36 @@ jobs:
           git remote add upstream https://github.com/Nycolazs/ACNHRecomp.git
           git fetch --no-tags upstream +refs/heads/main:refs/remotes/upstream/main
           upstream_sha="$(git rev-parse refs/remotes/upstream/main)"
-          # Only create/fast-forward the tracking ref. A rewritten upstream will
-          # fail safely instead of overwriting downstream history.
-          git push origin refs/remotes/upstream/main:refs/heads/upstream-main
+          # Keep a dedicated tracking branch with upstream history, but do not
+          # import workflow changes: the Actions token has no workflows scope.
+          # Do not touch downstream main or force-update the tracking branch.
+          if git ls-remote --exit-code --heads origin upstream-main >/dev/null 2>&1; then
+            git fetch --no-tags origin refs/heads/upstream-main:refs/remotes/origin/upstream-main
+            git switch -C upstream-main refs/remotes/origin/upstream-main
+          else
+            git switch -C upstream-main refs/remotes/origin/main
+          fi
+          before="$(git rev-parse HEAD)"
+          if ! git merge-base --is-ancestor "$upstream_sha" HEAD; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            # A failed merge may be recoverable if ONLY workflows conflict.
+            git merge --no-ff --no-commit "$upstream_sha" || true
+            git restore --source="$before" --staged --worktree -- .github/workflows
+            if [[ -n "$(git ls-files -u)" ]]; then
+              echo "::error::Upstream source conflicts remain; review manually."
+              git ls-files -u
+              exit 1
+            fi
+            if ! git diff --cached --quiet "$before" -- .github/workflows; then
+              echo "::error::Workflow tree was changed; refusing to push."
+              exit 1
+            fi
+            git commit -m "chore(sync): import upstream $upstream_sha without workflow changes"
+            git push origin HEAD:refs/heads/upstream-main
+          else
+            echo "Already contains upstream $upstream_sha."
+          fi
           tag="upstream-${upstream_sha:0:12}"
           {
             echo "upstream=$upstream_sha"
