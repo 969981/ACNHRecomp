@@ -71,9 +71,13 @@ jobs:
             echo "Already contains upstream $upstream_sha."
           fi
           tag="upstream-${upstream_sha:0:12}"
+          # Use our workflow-preserving merge commit as the release tag target.
+          # Tagging the raw upstream commit would import workflow files again.
+          tracked_head="$(git rev-parse HEAD)"
           {
             echo "upstream=$upstream_sha"
             echo "tag=$tag"
+            echo "tracked_head=$tracked_head"
           } >> "$GITHUB_OUTPUT"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'publish=false' >> "$GITHUB_OUTPUT"
@@ -112,6 +116,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.sync.outputs.tag }}
           UPSTREAM_SHA: ${{ steps.sync.outputs.upstream }}
+          TRACKED_HEAD: ${{ steps.sync.outputs.tracked_head }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -120,7 +125,7 @@ jobs:
           printf 'Unofficial source-only upstream snapshot from Nycolazs/ACNHRecomp.\nUpstream commit: %s\nDownstream main is not changed by this workflow.\nNo Nintendo game ROM or game-derived binary is distributed.\n' "$UPSTREAM_SHA" > release-notes.md
           gh release create "$TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$UPSTREAM_SHA" \
+            --target "$TRACKED_HEAD" \
             --title "ACNHRecomp upstream source ${UPSTREAM_SHA:0:12}" \
             --notes-file release-notes.md \
             --prerelease
