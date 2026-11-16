@@ -64,6 +64,11 @@ void boot();
 void cpu_profile_register(const char* name);  // cpu_profile.cpp
 }
 
+namespace nx {
+void olsc_backup_on_exit();  // hle_olsc.cpp
+void game_clock_save();     // game_clock.cpp: a faster clock's gained time into config.ini
+}
+
 namespace nx::plat {
 
 namespace {
@@ -954,6 +959,8 @@ int main(int argc, char** argv) {
             switch (e.type) {
             case SDL_EVENT_QUIT:
                 nx::log("platform: quit requested (window closed / Cmd-Q)");
+                nx::olsc_backup_on_exit();
+                nx::game_clock_save();
                 exit_process(0);
             case SDL_EVENT_WINDOW_MINIMIZED:
             case SDL_EVENT_WINDOW_HIDDEN:

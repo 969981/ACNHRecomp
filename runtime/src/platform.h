@@ -100,6 +100,9 @@ float default_render_scale();
 [[noreturn]] void restart_app();
 // Android: `url` in the app `package` when it is installed (Instagram, GitHub), else in the browser (platform_android).
 bool open_url_in_app(const std::string& url, const char* package);  // false: nothing opened it
+// Nextendo's sign-in page (`url`, whose redirect_uri is the loopback listener) in the app's own screen, a WebView
+// (android/java SignIn), so the app stays in front while the player signs in; the browser when that screen can't start.
+bool open_sign_in(const std::string& url);
 // An HTTPS request on java.net.HttpURLConnection (Android's TLS and certificate store): nextendo_http.cpp, as Android
 // has no curl. status 0 and `error` when nothing came back.
 bool https_request(const std::string& method, const std::string& url,
@@ -161,6 +164,7 @@ inline bool key_types(int usage) { return (usage >= 4 && usage <= 39) || (usage 
 // across the landscape screen), radius r (a fraction of its height), opacity alpha. 0 where nothing is drawn.
 struct OverlayShape {
     float x, y, r, alpha;
+    uint32_t label = 0;  // its letters for present.frag: (first + 1) | (second + 1) << 8 into "ABXYRLZ+-"; 0: none
 };
 size_t touch_overlay(OverlayShape* out, size_t max);
 void set_gamepad_connected(bool connected);  // Android: a controller connected hides the touch controls
@@ -243,6 +247,14 @@ void open_path(const std::string& path);       // shows a folder in the file man
 void pick_path(bool zip, const std::string& title);
 void pick_file(const std::string& title, const char* extension);  // a single file (e.g. Amiibo .bin)
 bool pick_result(std::string& path);           // true once, when an answer came ("" = cancelled)
+#if defined(__ANDROID__)
+// Settings > Video > GPU driver: a driver file picked and copied into <game folder>/drivers/; answer via pick_result
+// ("ok:<file>", "error:<why>", "" = cancelled).
+void import_gpu_driver();
+// Local Play (hle_ldn.cpp): Wi-Fi's multicast lock held while a session is open, so the phone gets the searches'
+// broadcasts (many drop them otherwise), and released after.
+void wifi_multicast(bool on);
+#endif
 
 // Audio: interleaved s16 at 48 kHz; channels is 2 or 6 (Android always opens stereo). `done` is called on any thread
 // when a submitted buffer has been played.

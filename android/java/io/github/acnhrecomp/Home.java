@@ -50,10 +50,28 @@ public class Home extends Activity {
 
     private String t(String en, String ptBr) { return pt ? ptBr : en; }
 
+    // The app started again in a new process (the chosen folder is saved: it opens straight into it). Android keeps a
+    // closed app's process, with the game of the last folder loaded, so "close and open again" was not enough.
+    private void restartProcess() {
+        Intent i = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        if (i != null) {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(i);
+        }
+        finishAffinity();
+        // as platform_android.cpp's restart_app (_exit): no atexit handlers or static destructors with native threads
+        // still running
+        android.os.Process.killProcess(android.os.Process.myPid());
+    }
+
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         String error = getIntent().getStringExtra("error");
+        if ("restart".equals(error)) {  // another folder than the game loaded in this process: a new process takes it
+            restartProcess();
+            return;
+        }
         boolean ask = getIntent().getBooleanExtra("pick", false) || error != null;
         String saved = ask ? "" : readSaved();
         if (!saved.isEmpty() && hasPackage(new File(saved)) && canRead(saved)) {
@@ -168,6 +186,15 @@ public class Home extends Activity {
                     "Esta pasta não tem o jogo preparado (" + GAME_LIB + "). Prepare o seu jogo com o "
                             + "ACNHRecomp-Importer (baixe no nosso Discord: discord.gg/VJW9Dtdu7a) e depois no "
                             + "computador com tools/android_install.sh.");
+        if (why.contains("cannot locate symbol"))  // a library from ACNHRecomp-Importer before 1.0.4 (no DT_NEEDED)
+            return t("The app can't load the game in this folder. Usually it was prepared by an older "
+                            + "ACNHRecomp-Importer (before 1.0.4): prepare it again with the latest one (on our Discord: "
+                            + "discord.gg/VJW9Dtdu7a), which keeps what it extracted and builds the library again. If it "
+                            + "was prepared by a newer Importer, update this app.\n\n" + why,
+                    "O app não consegue carregar o jogo desta pasta. Normalmente ela foi preparada por um "
+                            + "ACNHRecomp-Importer antigo (anterior ao 1.0.4): prepare de novo com o mais novo (no nosso "
+                            + "Discord: discord.gg/VJW9Dtdu7a), que reaproveita o que já extraiu e refaz a biblioteca. Se "
+                            + "foi preparada por um Importer mais novo, atualize este app.\n\n" + why);
         if (why.equals("restart"))
             return t("Close the app and open it again to use another folder.",
                     "Feche o app e abra de novo para usar outra pasta.");
@@ -272,15 +299,21 @@ public class Home extends Activity {
                     View p = box.findViewWithTag("progress");
                     if (p != null) box.removeView(p);
                 }
-                if (!why.isEmpty()) {
+                if (!why.isEmpty() && !why.equals("restart")) {
                     if (message == null) show(null);
                     say(explain(why), true);
                     return;
                 }
+                boolean saved = true;
                 try (FileOutputStream o = new FileOutputStream(new File(getFilesDir(), "data_root.txt"))) {
                     o.write((folder + "\n").getBytes(StandardCharsets.UTF_8));
                 } catch (Exception e) {
-                    // the game still starts; next time the folder is asked for again
+                    saved = false;  // the game still starts; next time the folder is asked for again
+                }
+                if (why.equals("restart")) {  // this process has another folder's game loaded: a new one takes this folder
+                    if (saved) restartProcess();
+                    else say(explain(why), true);  // not saved: a new process would not know the folder
+                    return;
                 }
                 Intent game = new Intent();
                 game.setClassName(getPackageName(), "android.app.NativeActivity");

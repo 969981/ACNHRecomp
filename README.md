@@ -17,8 +17,8 @@
   </a>
 </p>
 
-ACNHRecomp turns the Switch code of *Animal Crossing: New Horizons* (title ID `01006F8002326000`; version 3.0.2
-recommended, 3.0.3, 2.0.7 and 1.0.0 supported) into native code for your computer. It is not an emulator: the game's AArch64 machine code is
+ACNHRecomp turns the Switch code of *Animal Crossing: New Horizons* (title ID `01006F8002326000`; version 3.0.3
+recommended, which Nextendo Online needs; 3.0.2, 2.0.7 and 1.0.0 supported) into native code for your computer. It is not an emulator: the game's AArch64 machine code is
 translated ahead of time into C++ and compiled for the host, the system services the game calls are reimplemented
 natively, and the game's NVN graphics calls are translated to **Vulkan**. It is built on the framework of
 [SuperMarioWonderRecomp](https://github.com/BelmanteGu/SuperMarioWonderRecomp).
@@ -132,7 +132,7 @@ GPU; see [docs/STATUS.md](docs/STATUS.md) for the full, regularly updated log.
 | 60 fps | Native with ACNHRecomp-Importer 1.0.6+ ([credits](#credits-and-references)) |
 | Online features through Nintendo | Unavailable (never contacted) |
 | Online via Nextendo (Dodo Codes, Search for a friend) | Supported on 3.0.3; [docs/NEXTENDO.md](docs/NEXTENDO.md) |
-| Visits between PCs (airport, Local Play), over LAN or the internet, no server | Local mode, works on Windows; [docs/LOCAL_PLAY.md](docs/LOCAL_PLAY.md) |
+| Visits between PCs and Switches with ldn_mitm (airport, Local Play), over LAN or a virtual LAN | New: PC ↔ Switch (ldn_mitm) tested on Windows; PC ↔ PC, Linux and macOS not yet; [docs/LOCAL_PLAY.md](docs/LOCAL_PLAY.md) |
 
 **Known issues**
 
@@ -190,7 +190,8 @@ The folder's layout:
 | `game.ini`, `.import/` | What ACNHRecomp-Importer imported (title, update version, main's build id) and its record of a finished import: how the launcher and the setup recognise its folders | Yes |
 | `gen/` | The game's code recompiled to C++ by the importer. When it was made by the same recompiler as this repository's `recomp/`, the setup uses it instead of recompiling | Optional |
 
-Version 3.0.2 (or 3.0.3) gets every fix of the port (native 60 FPS, wide screens, the mouse); 2.0.7 and 1.0.0 play
+Version 3.0.3 (or 3.0.2) gets every fix of the port (native 60 FPS, wide screens, the mouse), and 3.0.3 plays online
+with Nextendo; 2.0.7 and 1.0.0 play
 with picture, sound and the mouse; any other version is built as it is ([docs/VERSIONS.md](docs/VERSIONS.md)). The
 setup links to this folder instead of copying it: keep it where it is.
 
@@ -543,8 +544,11 @@ From the **Saves** page you can import a save from:
 | **Ryujinx** / **Ryubing** | Detected automatically, including Flatpak installs |
 | Another **ACNHRecomp** folder | |
 
-- **Before every import or restore, the current save is backed up** to `private/acnh/user/backups/`. The 10 newest
-  backups are kept, and "Back up now" makes one on demand.
+- **Before every import or restore, the current save is backed up** to `user/backups/<island> <id>/`, a folder per
+  island (two islands with the same name share one). Per island, the 10 newest backups are kept, and "Back up now"
+  makes one on demand. The game's own *Island Backup* makes automatic ones (`.auto`) at the start, at the title screen
+  and when quitting (not on Android), of which the 3 newest are kept apart from the others. The Saves tab lists every
+  island's backups.
 - Imports are staged next to the save folder and moved in at once, so a failure never leaves a half-written save.
 - After an import or restore, **quit and restart the game**, so it does not write the old island over the new one.
 - **Export** writes the save to a folder (`ACNH-<date>-<time>/`) or a `.zip` in the layout that JKSV and Checkpoint
@@ -648,8 +652,8 @@ The game folder has not been linked yet: pass `--game <your game folder>` on the
 
 **The launcher or the setup says the folder was not prepared by ACNHRecomp-Importer.**
 ACNHRecomp only accepts game folders made by ACNHRecomp-Importer. Download it on our Discord
-([discord.gg/VJW9Dtdu7a](https://discord.gg/VJW9Dtdu7a)), prepare your game with it (your NSP or XCI, update 3.0.2 and
-your console's keys) and choose the folder it writes. A folder it is still working on, or that it stopped preparing, is
+([discord.gg/VJW9Dtdu7a](https://discord.gg/VJW9Dtdu7a)), prepare your own copy of the game with it (update 3.0.3
+recommended) and choose the folder it writes. A folder it is still working on, or that it stopped preparing, is
 not accepted either: let it finish.
 
 **The setup says the game folder has no exefs/ and romfs/, or that romfs/ has no Shader/ folder.**
@@ -674,8 +678,9 @@ Some GNOME setups make libdecor/GTK abort the process; the runtime prefers X11/X
 `private/acnh/nx_play.log`.
 
 **Can I visit friends or use Nook Link?**
-Visiting friends: **Nextendo Online** (Dodo / Search, [docs/NEXTENDO.md](docs/NEXTENDO.md)) or **Local** peer play
-([docs/LOCAL_PLAY.md](docs/LOCAL_PLAY.md)). Nintendo's own online services (including Nook Link) are never used.
+Visiting friends: **Nextendo Online** (Dodo / Search, [docs/NEXTENDO.md](docs/NEXTENDO.md)) or **Local** play at the
+airport, on a LAN or a virtual LAN, with PCs or a Switch running ldn_mitm ([docs/LOCAL_PLAY.md](docs/LOCAL_PLAY.md)).
+Nintendo's own online services (including Nook Link) are never used.
 
 **Does time pass on my island?**
 Yes. The island follows your computer's date, time and time zone.
@@ -777,6 +782,8 @@ More detail: [docs/ACNH.md](docs/ACNH.md) (the game's modules, RomFS and shader 
 - [Dear ImGui](https://github.com/ocornut/imgui) (MIT): the settings screen.
 - [MHGURecomp](https://github.com/morerokk/MHGURecomp) by morerokk (MIT): the design of local play between PCs
   (`nn::ldn`, virtual sockets), [docs/LOCAL_PLAY.md](docs/LOCAL_PLAY.md).
+- [ldn_mitm](https://github.com/spacemeowx2/ldn_mitm) by spacemeowx2 (GPLv2): the LAN protocol local play speaks, so a
+  Switch running it plays with PCs (reimplemented, no code taken), [docs/LOCAL_PLAY.md](docs/LOCAL_PLAY.md).
 - [RenoDX](https://github.com/clshortfuse/renodx) by Carlos Lopez Jr. (MIT): the HDR output and tonemapping
   (`SwapChainPass`, `ToneMapPass`, RenoDRT, user grading) compiled into the HDR shaders (`tools/shaders/hdr`; the
   generated `.inc` files are in the repository, regenerating them needs a RenoDX checkout: `tools/gen_spirv_inc.py`).

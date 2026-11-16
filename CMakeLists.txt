@@ -113,6 +113,12 @@ if(NX_TESTS AND NOT ANDROID)
     if(EXISTS "${CMAKE_SOURCE_DIR}/private/wonder/spirv")  # the game's own shaders: never in the repository
         add_test(NAME shader_cache COMMAND shader_cache_test "${CMAKE_SOURCE_DIR}/private/wonder")
     endif()
+    add_executable(ldn_net_test tests/ldn_net_test.cpp)
+    target_include_directories(ldn_net_test PRIVATE runtime/src)
+    if(WIN32)
+        target_link_libraries(ldn_net_test PRIVATE ws2_32)
+    endif()
+    add_test(NAME ldn_net COMMAND ldn_net_test)
     if(WIN32)
         add_executable(memguard_test tests/memguard_test.cpp)
         target_link_libraries(memguard_test PRIVATE psapi)
@@ -266,8 +272,7 @@ set(NX_RUNTIME_SOURCES
     runtime/src/hle_ldn.cpp
     runtime/src/hle_vsock.cpp
     runtime/src/ldn_link.cpp
-    runtime/src/ldn_discovery.cpp
-    runtime/src/ldn_upnp.cpp
+    runtime/src/ldn_lan.cpp
     runtime/src/nextendo.cpp
     runtime/src/nextendo_http.cpp
     runtime/src/hle_audio.cpp
@@ -577,6 +582,7 @@ else()
 endif()
 target_sources(${NX_GAME} PRIVATE runtime/src/saves.cpp)
 target_link_libraries(${NX_GAME} PRIVATE nx_save_storage)
+target_sources(${NX_GAME} PRIVATE runtime/src/hle_olsc.cpp)  # the Island Backup, kept with the saves (saves.cpp)
 
 # Mbed TLS (Apache-2.0): the game's nn::ssl connections (NEX, the island services) and the signed account id_token
 # for Nextendo Online (docs/NEXTENDO.md). Fetched as a release archive on the first configure.

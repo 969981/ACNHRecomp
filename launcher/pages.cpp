@@ -13,7 +13,7 @@
 // page under it and its buttons in a footer line. Sizes are design pixels times `scale` (main.cpp); below an aspect
 // of 1.2 the two-column parts stack.
 #include "launcher.h"
-#include "ldn_upnp.h"
+#include "ldn_lan.h"
 #include "nextendo.h"
 
 #include <thread>
@@ -1421,7 +1421,9 @@ void opening_overlay() {
     // Once the game's window is there the launcher's hides, and goes when its sound logo has played out.
     static bool hidden = false;
     if (!hidden && (game_window_shown() || t > kGiveUp)) SDL_HideWindow(g_window), hidden = true;
-    if (hidden && !start_sound_playing()) g_exit = true;
+    // Play hides the launcher and then quits it: an update being installed finishes first (closing the window is
+    // still possible until its files are being swapped, pages_close_requested)
+    if (hidden && !start_sound_playing() && !update_busy()) g_exit = true;
     auto out_quart = [](double x) { return float(1 - std::pow(1 - std::clamp(x, 0.0, 1.0), 4.0)); };
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImVec2 size = ImGui::GetIO().DisplaySize;
@@ -2248,8 +2250,21 @@ void mods_popup() {
 void update_notice() {
     const UpdateInfo u = update_info();
     if (!u.available) return;
-    const std::string msg = trf("launcher.update.available", u.version);
-    const char* get = tr("launcher.update.get");
+    // In place when it can be (update_can_install), else the release page; then the restart into it.
+    const UpdateProgress pr = update_progress();
+    const bool busy = pr.stage != UpdateStage::Idle && pr.stage != UpdateStage::Done && pr.stage != UpdateStage::Failed;
+    const bool in_place = update_can_install() || pr.stage != UpdateStage::Idle;
+    std::string msg = trf("launcher.update.available", u.version);
+    const char* get = tr(in_place ? "launcher.update.install" : "launcher.update.get");
+    switch (pr.stage) {
+        case UpdateStage::Downloading: msg = tr("launcher.update.downloading"); break;
+        case UpdateStage::Checking: msg = tr("launcher.update.checking"); break;
+        case UpdateStage::Unpacking:
+        case UpdateStage::Installing: msg = tr("launcher.update.installing"); break;
+        case UpdateStage::Done: msg = trf("launcher.update.installed", u.version), get = tr("launcher.update.restart"); break;
+        case UpdateStage::Failed: msg = trf("launcher.update.failed", pr.error), get = tr("launcher.update.get"); break;
+        default: break;
+    }
     const float r = S(11), pad = S(12), vpad = S(6), gap = ImGui::GetStyle().ItemSpacing.x;
     const float h = ImGui::GetFrameHeight() + 2 * vpad;
     const float w = pad + 2 * r + gap + ImGui::CalcTextSize(msg.c_str()).x + gap + button_width(get) + pad;
@@ -2262,7 +2277,15 @@ void update_notice() {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(msg.c_str());
     ImGui::SameLine();
-    if (button(get, kGreen)) SDL_OpenURL(u.url.c_str());
+    if (busy) {
+        ImGui::BeginDisabled();
+        button(get, kGreen);
+        ImGui::EndDisabled();
+    } else if (button(get, kGreen)) {
+        if (pr.stage == UpdateStage::Done) update_restart();
+        else if (pr.stage != UpdateStage::Failed && in_place) update_install_start();
+        else SDL_OpenURL(u.url.c_str());
+    }
     ImGui::SetCursorScreenPos(ImVec2(at.x, p.y + h));
     ImGui::Dummy(ImVec2(0, S(6)));
 }
@@ -2517,31 +2540,7 @@ void footer_settings() {
     if (button(tr("launcher.settings.open_data"), kWhite)) open_folder(g_build.data);
 }
 
-// ---- online: local play over the internet, the same settings as the game's Online page -------------------------
-
-struct OnlineCheck {
-    std::mutex lock;
-    nx::LinkCheck state = nx::LinkCheck::Idle;
-    std::string address;
-    std::atomic<bool> running{false};
-};
-OnlineCheck g_online;
-
-void online_check_start() {
-    if (g_online.running.exchange(true)) return;
-    {
-        std::lock_guard lk(g_online.lock);
-        g_online.state = nx::LinkCheck::Running;
-    }
-    std::thread([] {
-        std::string address;
-        const nx::LinkCheck r = nx::upnp_check(39500, address);
-        std::lock_guard lk(g_online.lock);
-        g_online.state = r;
-        g_online.address = address;
-        g_online.running = false;
-    }).detach();
-}
+// ---- online: local play over the network (ldn_mitm's protocol), the same settings as the game's Online page ------
 
 void page_online() {
     heading(tr("tab.online"), tr("online.mode.desc"));
@@ -2581,12 +2580,14 @@ void page_online() {
                 ImGui::TextUnformatted(trf("online.nextendo.signed_in", acc.username).c_str());
                 if (!acc.friend_code.empty())
                     ImGui::TextUnformatted(trf("online.nextendo.friend_code", acc.friend_code).c_str());
+                ImGui::TextWrapped("%s", tr("online.nextendo.requirements"));
                 if (button(tr("online.nextendo.sign_out"), kWhite)) {
                     nx::nextendo::sign_out();
                     toast(tr("online.nextendo.sign_out"));
                 }
             } else {
                 ImGui::TextWrapped("%s", tr("online.nextendo.desc"));
+                ImGui::TextWrapped("%s", tr("online.nextendo.requirements"));
                 std::string cid = g_game_ini.get("online.nextendo.client_id", "");
                 if (cid.empty()) cid = nx::nextendo::client_id();
                 if (cid.empty()) {
@@ -2621,35 +2622,9 @@ void page_online() {
     if (enabled_changed) {
         g_game_ini.set("online.enabled", on ? "1" : "0");
         if (!g_game_ini.save()) toast(tr("launcher.settings.save_failed"));
-        if (on) online_check_start();
     }
     if (on) {
-        static bool checked = false;
-        if (!checked) {
-            checked = true;
-            online_check_start();
-        }
-        nx::LinkCheck state;
-        std::string address;
-        {
-            std::lock_guard lk(g_online.lock);
-            state = g_online.state;
-            address = g_online.address;
-        }
-        const char* text = "online.status.idle";
-        switch (state) {
-        case nx::LinkCheck::Running: text = "online.status.running"; break;
-        case nx::LinkCheck::NoRouter: text = "online.status.no_router"; break;
-        case nx::LinkCheck::Refused: text = "online.status.refused"; break;
-        case nx::LinkCheck::NoPublicAddress: text = "online.status.no_public"; break;
-        case nx::LinkCheck::Open: text = "online.status.open"; break;
-        case nx::LinkCheck::OpenVerified: text = "online.status.verified"; break;
-        case nx::LinkCheck::Idle: break;
-        }
-        ImGui::Separator();
-        ImGui::TextUnformatted(tr("online.status"));
-        text_small(tr(text));
-        if (button(tr("online.test"), kWhite, !g_online.running)) online_check_start();
+        static const std::string address = nx::ip_text(nx::local_address());
         if (!address.empty()) {
             static bool shown = false;
             ImGui::Separator();
@@ -2885,6 +2860,7 @@ void pages_drag(bool over, float x, float y) {
 }
 
 void pages_close_requested() {
+    if (update_progress().stage == UpdateStage::Installing) return;  // a moment: the files are being swapped
     if (setup_state().running)
         g_confirm_quit = true;
     else
@@ -2999,6 +2975,9 @@ bool pages_draw(float scale, ImFont* title) {
     const bool center = g_page == Page::Welcome || g_page == Page::Done || g_page == Page::Home;
     // Home's update notice floats at the top of the card, in the space above the centred page: it moves nothing
     // when it appears.
+    // NX_LAUNCHER_UPDATE_AUTO=1 (tests, with NX_LAUNCHER_VERSION): the update installed at once, on any page
+    static const bool auto_install = std::getenv("NX_LAUNCHER_UPDATE_AUTO") != nullptr;
+    if (auto_install && update_progress().stage == UpdateStage::Idle && update_can_install()) update_install_start();
     if (g_page == Page::Home) {
         const ImVec2 at = ImGui::GetCursorPos();
         update_notice();
